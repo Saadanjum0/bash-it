@@ -1,0 +1,93 @@
+name: CI
+
+# Triggers the workflow on push or pull request events
+on: [push, pull_request]
+
+permissions: {}
+
+jobs:
+  bats-test:
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        persist-credentials: false
+    - name: Install greadlink
+      if: startsWith(runner.os, 'macOS')
+      run: brew install coreutils
+    - name: Test code
+      run: test/run
+      env:
+        # --tap + --jobs causes TAP plan count mismatches on both Linux and macOS.
+        TEST_JOBS: 1
+
+  build-docs:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        persist-credentials: false
+    - name: Set up Python
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+      with:
+        python-version: 3.12
+    - name: Install docs dependencies
+      run: python3 -m pip install -r docs/requirements.txt
+    - name: Build the docs
+      run: sphinx-build -W -b html docs docs/_build/html
+
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        persist-credentials: false
+    - name: Set up Python
+      uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+      with:
+        python-version: 3.12
+    - name: Install shfmt
+      env:
+        shfmt_version: v3.14.0
+      run: |
+        wget -qO shfmt "https://github.com/mvdan/sh/releases/download/${shfmt_version?}/shfmt_${shfmt_version?}_linux_amd64"
+        chmod +x shfmt
+        sudo mv shfmt /usr/bin/
+        shfmt --version
+    - name: Install shellcheck
+      env:
+        scversion: stable # Or latest, vxx, etc
+      run: |
+        wget -qO- "https://github.com/koalaman/shellcheck/releases/download/${scversion?}/shellcheck-${scversion?}.linux.x86_64.tar.xz" | tar -xJv "shellcheck-${scversion}/shellcheck"
+        sudo cp "shellcheck-${scversion}/shellcheck" /usr/bin/
+        shellcheck --version
+    - name: Install pre-commit
+      run: python3 -m pip install -r test/lint-requirements.txt
+    - name: Run lint
+      run: ./lint_clean_files.sh
+
+  lint-differential:
+    runs-on: ubuntu-latest
+
+    permissions:
+      security-events: write
+
+    steps:
+      - name: Repository checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - id: ShellCheck
+        name: Differential ShellCheck
+        uses: redhat-plumbers-in-action/differential-shellcheck@d965e66ec0b3b2f821f75c8eff9b12442d9a7d1e # v5.5.6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
